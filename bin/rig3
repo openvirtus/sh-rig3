@@ -1,0 +1,222 @@
+#!/bin/sh -e
+#L:
+#l:  Copyright (c) 2018 Sergi Iglesias, <sergi.iglesias10@net-c.es>
+#L:
+#L:  Permission is hereby granted, free of charge, to any person obtaining
+#L:  a copy of this software and associated documentation files (the
+#L:  "Software"), to deal in the Software without restriction, including
+#L:  without limitation the rights to use, copy, modify, merge, publish,
+#L:  distribute, sublicense, and/or sell copies of the Software, and to
+#L:  permit persons to whom the Software is furnished to do so, subject to
+#L:  the following conditions:
+#L:
+#L:  The above copyright notice and this permission notice shall be
+#L:  included in all copies or substantial portions of the Software.
+#L:
+#L:  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+#L:  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#L:  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+#L:  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+#L:  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+#L:  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+#L:  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#L:
+#h: Usage: $0 [OPTIONS...]
+#h:
+#h: Rig3 (Random Identity Generator 3) is an identity (name, surname, address, ...)
+#h: generator implemented in POSIX sh.
+#h:
+#h: -v     : Show honored environment variables. You can set them in `~/.rig3.cfg`.
+#h: -c NUM : Generate NUM identities. By default one.
+#h:
+#h: -f, -m                : Respectively, generate female and male names.
+#h: -N NATION|random|ls   : Select a nation. ie: anglosaxon, french.
+#h: -S STATE|random|ls    : Select a state/region. ie: usa, france.
+#h: -E PROVIDER|random|ls : Select an e-mail provider. ie: gmail
+#h: -W 'NAME SURNAME'     : Set name.
+#h:
+#h: -P PATTERN          : Pattern to print. [%n: Name][%l1: Last name][%l2: Last name]
+#h:                       [%s: Street][%t: Town name][%p: Province][%z: ZIP code]
+#h:                       [%c: Building number][%T: Telephone number][%/: Newline]
+#h:                       [%E: E-mail][%P: Password]
+#:: 
+rig3() {
+    ## Parse command line arguments.
+    local OPTIND optopt= ops= count=1
+    while getopts "vfmc:N:S:E:P:W:" optopt;do # OPTARG
+        local ops="${ops}${optopt}"
+        case $optopt in
+            f)  local RIG3_SEX=female                ;;
+            m)  local RIG3_SEX=male                  ;;
+            c)  local count="${OPTARG}"              ;;
+            N)  local RIG3_NATION="${OPTARG}"        ;;
+            S)  local RIG3_STATE="${OPTARG}"         ;;
+            E)  local RIG3_PROVIDER="${OPTARG}"      ;;
+            P)  local RIG3_PATTERN="${OPTARG}"       ;;
+            W)  local RIG3_OVERRIDE_NAME="${OPTARG}" ;;
+            \?) return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+    ## Show honored environment variables.
+    case "${ops}" in *v*) rig3_show_variables; return 0;; esac
+    ## List nations and states.
+    if test ls = "${RIG3_NATION}";then
+        rig3_list_nations
+        return 0
+    elif test ls = "${RIG3_STATE}";then
+        rig3_list_states
+        return 0
+    elif test ls = "${RIG3_EMAIL}";then
+        rig3_list_email
+        return 0
+    fi
+    ## Generate.
+    for num in `seq 1 "$count"`;do
+        if ! test "$num" = 1;then echo;fi
+        rig3_generate
+    done
+}
+rig3_calc_variables() {
+    if test ! -f "${HOME}/.rig3.cfg";then
+        true
+    elif . "${HOME}/.rig3.cfg";then
+        true
+    else
+        echo "rig3: error: Error sourcing ${HOME}/.rig3.cfg" >&2
+        exit 1
+    fi
+    local sharedir="`dirname "$0"`/.."
+    RIG3_NATION="${RIG3_NATION:-anglosaxon}"
+    RIG3_STATE="${RIG3_STATE:-usa}"
+    RIG3_SEX="${RIG3_SEX:-random}"
+    RIG3_PROVIDER="${RIG3_PROVIDER:-random}"
+    RIG3_DATADIR="`a="${sharedir}" sh -c 'cd "$a"; echo "${PWD}/share/rig3"'`"
+    RIG3_PATTERN="Name      : %n %l1%/Address   : %c %s, %t, %p  %z%/Telephone : %T%/E-Mail    : %E%/Password  : %P"
+}
+rig3_show_variables() {
+    printf '%-30s : %s\n' RIG3_NATION   "${RIG3_NATION}"
+    printf '%-30s : %s\n' RIG3_STATE    "${RIG3_STATE}"
+    printf '%-30s : %s\n' RIG3_SEX      "${RIG3_SEX}"
+    printf '%-30s : %s\n' RIG2_PROVIDER "${RIG3_PROVIDER}"
+    printf '%-30s : %s\n' RIG3_DATADIR  "${RIG3_DATADIR}"
+    printf '%-30s : %s\n' RIG3_PATTERN  "${RIG3_PATTERN}"
+}
+## ---------------------------------------------------------------------------------------
+rig3_list_nations() {
+    for d in `ls "${RIG3_DATADIR}/nations"`;do
+        if test -d "${RIG3_DATADIR}/nations/${d}";then
+            echo "${d}"
+        fi
+    done
+}
+rig3_list_states() {
+    for d in `ls "${RIG3_DATADIR}/regions"`;do
+        if test -d "${RIG3_DATADIR}/regions/${d}";then
+            echo "${d}"
+        fi
+    done
+}
+rig3_list_email() {
+    if test -f "${RIG3_DATADIR}/regions/${1:-${RIG3_STATE}}/email.lst";then
+        sed '/^\#/d' "${RIG3_DATADIR}/regions/${1:-${RIG3_STATE}}/email.lst" | awk '{print $1}' 
+    else
+        sed '/^\#/d' "${RIG3_DATADIR}/regions/usa/email.lst" | awk '{print $1}' 
+    fi
+}
+
+
+rig3_generate() {
+    ## Get state, nation and gender.
+    if test random = "${RIG3_NATION}";then
+        local nation="`rig3_list_nations | shuf -n 1`"
+    else
+        local nation="${RIG3_NATION}"
+    fi
+    if test random = "${RIG3_STATE}";then
+        local state="`rig3_list_states | shuf -n 1`"
+    else
+        local state="${RIG3_STATE}"
+    fi
+    if test random = "${RIG3_SEX}";then
+        local sex="`shuf -n 1 -e male female`"
+    else
+        local sex="${RIG3_SEX}"
+    fi
+    if test random = "${RIG3_PROVIDER}";then
+        local provider="`rig3_list_email "${state}" | shuf -n 1`"
+    else
+        local provider="${RIG3_PROVIDER}"
+    fi
+    
+    ## Get location.
+    if test -n "${RIG3_OVERRIDE_NAME}";then
+        local name="`  echo "${RIG3_OVERRIDE_NAME}" | awk '{print $1}'`"
+        local lname1="`echo "${RIG3_OVERRIDE_NAME}" | awk '{print $2}'`"
+        local lname2="`echo "${RIG3_OVERRIDE_NAME}" | awk '{print $3}'`"
+    else
+        local name="`       shuf -n 1 "${RIG3_DATADIR}/nations/${nation}/${sex}-names.lst" | tr -d '\r\n'`"
+        local lname="`      shuf -n 2 "${RIG3_DATADIR}/nations/${nation}/last-names.lst"   | tr -d '\r'`"
+        local lname1="`     echo "${lname}" | sed -n '1p'`"
+        local lname2="`     echo "${lname}" | sed -n '2p'`"
+    fi
+    local street="`     shuf -n 1 "${RIG3_DATADIR}/regions/${state}/streets.lst" | tr -d '\r\n'`"
+    local town="`       shuf -n 1 "${RIG3_DATADIR}/regions/${state}/towns.lst"   | tr -d '\r\n'`"
+    local town_name="`  echo "${town}" | awk '{print $1}' | tr '_' ' '`"
+    local town_prov="`  echo "${town}" | awk '{print $2}' | tr '_' ' '`"
+    local town_telp="`  echo "${town}" | awk '{print $3}'`"
+    local town_code="`  echo "${town}" | awk '{print $4}'`"
+    local town_numb="`  shuf -n 1 -i 1-99 | tr -d '\r\n'`"
+    local telephone="`  sh ${RIG3_DATADIR}/regions/${state}/telephone.sh ${town_telp}`"
+    local email="`      rig3_generate_mail "${provider}" "${name}" "${lname1}" | shuf -n 1`"
+    local password="`   rig3_generate_pass`"
+    
+    ## Print text.
+    echo "${RIG3_PATTERN}" | sed "
+    s|%n|${name}|g
+    s|%l1|${lname1}|g
+    s|%l2|${lname2}|g
+    s|%s|${street}|g
+    s|%t|${town_name}|g
+    s|%p|${town_prov}|g
+    s|%z|${town_code}|g
+    s|%c|${town_numb}|g
+    s|%T|${telephone}|g
+    s|%E|${email}|g
+    s|%P|${password}|g
+    s|%/|\\n|g"
+}
+
+rig3_generate_mail() {
+    local domain="${1}"
+    local name1="`echo "${2}" | tr '[:upper:]' '[:lower:]' `"
+    local name2="`echo "${3}" | tr '[:upper:]' '[:lower:]' `"
+    for name in "${name1}." "${name1}-" "`echo "${name1}" | sed 's|^\(.\).*|\1|g'`";do
+        for surname in "${name2}";do
+            for tail in `seq 5 20`;do
+                echo "${name}${surname}${tail}@${domain}" | tr ' ' '.'
+            done
+        done
+    done
+}
+
+rig3_generate_pass() {
+    echo "P`head -c 10 /dev/urandom | md5sum | head -c 11`"
+}
+
+
+
+
+
+## ---------------------------------------------------------------------------------------
+rig3_calc_variables
+if test @"`basename "$0"`" = @"rig3";then
+    if test @"${1}" = @"-h" || test @"${1}" = @"--help";then
+        sed -n 's/^ *#h: \{0,2\}//p' "$0" | sed "s|\\\$0|`basename $0`|g"
+        echo ""
+        sed -n 's/^ *#l: \{0,2\}//p' "$0"
+    else
+        rig3 "$@"
+    fi
+fi
+

@@ -1,0 +1,150 @@
+#!/bin/sh -e
+#L:
+#l:  Copyright (c) 2018 Sergi Iglesias, <sergi.iglesias10@net-c.es>
+#L:
+#L:  Permission is hereby granted, free of charge, to any person obtaining
+#L:  a copy of this software and associated documentation files (the
+#L:  "Software"), to deal in the Software without restriction, including
+#L:  without limitation the rights to use, copy, modify, merge, publish,
+#L:  distribute, sublicense, and/or sell copies of the Software, and to
+#L:  permit persons to whom the Software is furnished to do so, subject to
+#L:  the following conditions:
+#L:
+#L:  The above copyright notice and this permission notice shall be
+#L:  included in all copies or substantial portions of the Software.
+#L:
+#L:  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+#L:  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#L:  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+#L:  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+#L:  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+#L:  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+#L:  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#L:
+#h: Usage: $0 ...
+#h:
+#h: -v          : Show environment variables.
+#h: -p PROVIDER : Change face provider.
+#h: -d NUMBER   : Download faces.
+#h:
+#h: -l : List downloaded faces.
+#h: -i : Select a face interactively.
+#::
+rig3_face() {
+    ## Parse command line arguments.
+    local OPTIND optopt= ops=
+    while getopts "vp:d:li" optopt;do # OPTARG
+        local ops="${ops}${optopt}"
+        case $optopt in
+            d)  rig3_face_download "${OPTARG}";;
+            \?) return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+    ## Show variables.
+    case "${ops}" in *v*) rig3_face_show_variables; return 0;; esac
+    ## Operations.
+    case "${ops}" in
+        *l*) rig3_face_list   ;;
+        *i*) rig3_face_select ;;
+        *)   rig3_face_list | shuf -n 1;;
+    esac
+    
+}
+rig3_face_show_variables() {
+    printf '%-30s : %s\n' RIG3_HOMEDIR  "${RIG3_HOMEDIR}"
+    printf '%-30s : %s\n' RIG3_PROVIDER "${RIG3_PROVIDER}"
+    printf '%-30s : %s\n' RIG3_MD5SUM   "${RIG3_MD5SUM}"
+    printf '%-30s : %s\n' RIG3_XDOTOOL  "${RIG3_XDOTOOL}"
+    printf '%-30s : %s\n' RIG3_XVIEW    "${RIG3_XVIEW}"
+}
+rig3_face_calc_variables() {
+    RIG3_HOMEDIR="${RIG3_HOMEDIR:-${HOME}/.rig3}"
+    RIG3_PROVIDER="${RIG3_PROVIDER:-thispersondoesnotexist}"
+    RIG3_MD5SUM="${RIG3_MD5SUM:-md5sum}"
+    RIG3_XDOTOOL="${RIG3_XDOTOOL:-xdotool}"
+    RIG3_XVIEW="${RIG3_XVIEW:-xview}"
+}
+## ---------------------------------------------------------------------------
+rig3_face_download() {
+    local dir="${RIG3_HOMEDIR}/faces/${RIG3_PROVIDER}"
+    local tmp="${RIG3_HOMEDIR}/.tmp"
+    mkdir -p "${dir}"
+    for x in `seq 1 "$1"`;do
+        echo -n "Downloading ${x}/${1} ..." >&2
+        rig3_face_download_"${RIG3_PROVIDER}" > "${tmp}"
+        local id="`"${RIG3_MD5SUM}" "${tmp}" | head -c 6`"
+        local file="${dir}/face-${id}.jpg"
+        convert "${tmp}" -scale 256x256 "${file}"
+        rm "${tmp}"
+        echo " ${file}" >&2
+    done
+}
+rig3_face_list() {
+    local dir="${RIG3_HOMEDIR}/faces/${RIG3_PROVIDER}"
+    if test -d "${dir}";then
+        find "${dir}" -type f -iregex '.*\.jpg$'
+    fi
+}
+rig3_face_select() {
+    ## Get window.
+    local win="`"${RIG3_XDOTOOL}" getwindowfocus`" val=
+    ## For each image.
+    for f in `rig3_face_list | head -n 30`;do
+        ## Fork Xview.
+        "${RIG3_XVIEW}" -shrink -quiet -at 0,0 "${f}" &
+        local pid="$!"
+        sleep 1
+        ## Get focus.
+        "${RIG3_XDOTOOL}" windowfocus    "${win}"
+        "${RIG3_XDOTOOL}" windowactivate "${win}"
+        ## Get val.
+        echo -n "Type [o Other (default)] [d Delete] [s Select this] [q Quit]> " >&2
+        read val
+        ## Kill Xview.
+        kill "${pid}" 2>/dev/null || true
+        wait
+        ## Perform operation.
+        case "${val}" in
+            d)   rm "${f}"; continue;;
+            s)   echo "${f}"; return 0;;
+            q)   return 0;;
+            o|*) continue;;
+        esac
+    done
+}
+
+
+
+rig3_face_download_thispersondoesnotexist() {
+    curl -s --compressed                                           \
+         'https://thispersondoesnotexist.com/image'                \
+         -H 'User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:74.0) Gecko/20100101 Firefox/74.0' \
+         -H 'Accept: image/webp,*/*'                               \
+         -H 'Accept-Language: es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3' \
+         -H 'Connection: keep-alive'                               \
+         -H 'Referer: https://thispersondoesnotexist.com/'         \
+         -H 'If-Modified-Since: Thu, 09 Apr 2020 18:29:29 GMT'     \
+         -H 'If-None-Match: "5e8f6989-d2bdd"'                      \
+         -H 'Cache-Control: max-age=0'                             \
+         -H 'TE: Trailers'
+}
+
+
+
+
+
+
+
+
+## ---------------------------------------------------------------------------
+rig3_face_calc_variables
+if test @"`basename "$0"`" = @"rig3-face";then
+    if test @"${1}" = @"-h" || test @"${1}" = @"--help";then
+        sed -n 's/^ *#h: \{0,2\}//p' "$0" | sed "s|\\\$0|`basename $0`|g"
+        echo ""
+        sed -n 's/^ *#l: \{0,2\}//p' "$0"
+    else
+        rig3_face "$@"
+    fi
+fi
